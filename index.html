@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>長座体前屈 完全クラウド同期管理システム</title>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { box-sizing: border-box; font-family: "Helvetica Neue", Arial, sans-serif; }
+        body { background-color: #f4f7f6; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 850px; margin: 0 auto; background: #ffffff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+        h1, h2, h3 { color: #2c3e50; }
+        h1 { text-align: center; }
+        .card { background: #fafafa; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e0e0e0; }
+        label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9em; color: #555; }
+        input, select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; }
+        button { padding: 10px 18px; background-color: #3498db; color: white; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; margin-top: 15px; }
+        button:hover { background-color: #2980b9; }
+        .btn-full { width: 100%; }
+        .btn-success { background-color: #2ecc71; }
+        .btn-danger { background-color: #e74c3c; }
+        .btn-purple { background-color: #8e44ad; }
+        .btn-secondary { background-color: #f39c12; }
+        .btn-logout { background-color: #7f8c8d; margin-top: 0; }
+        .hidden { display: none; }
+        .user-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 10px; border-bottom: 1px solid #eee; text-align: center; }
+        th { background-color: #f0f3f5; }
+        .chart-container { position: relative; margin-top: 20px; height: 300px; }
+        .form-row { display: flex; gap: 10px; }
+        .form-row > div { flex: 1; }
+        .loading-overlay { text-align: center; color: #3498db; font-weight: bold; margin-top: 10px; }
+        .status-msg { font-size: 0.85em; margin-top: 5px; font-weight: bold; }
+        .pass-code { font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px; letter-spacing: 1px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>長座体前屈 記録管理システム</h1>
+
+    <!-- 1. ログイン画面 -->
+    <div id="login-section">
+        <div class="card" style="max-width: 400px; margin: 0 auto;">
+            <h2 style="text-align: center; margin-top:0;">クラウドログイン</h2>
+            <form id="login-form">
+                <label for="student-id">ログインID</label>
+                <input type="text" id="student-id" required placeholder="学年→クラス→出席番号　例：1101">
+                
+                <label for="password">パスワード</label>
+                <input type="password" id="password" required placeholder="････">
+                
+                <button type="submit" class="btn-full" id="login-btn">ログイン</button>
+                <div id="login-loading" class="loading-overlay hidden">スプレッドシートで認証中...</div>
+            </form>
+            <p id="login-error" style="color: red; text-align: center; display: none; margin-top: 10px;">IDまたはパスワードが違います</p>
+        </div>
+    </div>
+
+    <!-- 2. 生徒用マイページ・ダッシュボード -->
+    <div id="student-dashboard" class="hidden">
+        <div class="user-header">
+            <h3>ようこそ、<span id="user-display-name"></span> さん</h3>
+            <button class="btn-logout" onclick="logout()">ログアウト</button>
+        </div>
+
+        <!-- 記録入力カード -->
+        <div class="card">
+            <h3>記録を入力する</h3>
+            <form id="record-form">
+                <div class="form-row">
+                    <div>
+                        <label for="record-date">日付</label>
+                        <input type="date" id="record-date" required>
+                    </div>
+                    <div>
+                        <label for="record-val">記録 (cm)</label>
+                        <input type="number" id="record-val" step="0.1" required placeholder="例: 42.5">
+                    </div>
+                </div>
+                <button type="submit" class="btn-full btn-success" id="save-btn">クラウドへ記録を保存</button>
+                <div id="save-status" class="status-msg"></div>
+            </form>
+        </div>
+
+        <!-- グラフ表示カード -->
+        <div class="card">
+            <h3>記録の変化（リアルタイム同期グラフ）</h3>
+            <div id="graph-loading" class="loading-overlay hidden">スプレッドシートからデータ読み込み中...</div>
+            <div class="chart-container">
+                <canvas id="recordChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 過去履歴一覧カード -->
+        <div class="card">
+            <h3>過去の記録一覧</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>日付</th>
+                        <th>記録 (cm)</th>
+                    </tr>
+                </thead>
+                <tbody id="history-list"></tbody>
+            </table>
+        </div>
+
+        <!-- 生徒マイページ：パスワード変更カード -->
+        <div class="card" style="border-top: 3px solid #f39c12;">
+            <h3>🔒 マイページ：パスワードの変更</h3>
+            <form id="change-pass-form">
+                <div class="form-row">
+                    <div>
+                        <label for="old-pass">現在のパスワード</label>
+                        <input type="password" id="old-pass" required placeholder="現在のパスワード">
+                    </div>
+                    <div>
+                        <label for="new-pass">新しいパスワード</label>
+                        <input type="password" id="new-pass" required placeholder="新しいパスワード">
+                    </div>
+                </div>
+                <button type="submit" class="btn-secondary" id="change-pass-btn">パスワードを変更する</button>
+                <div id="pass-status" class="status-msg"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 3. 管理者用ダッシュボード -->
+    <div id="admin-dashboard" class="hidden">
+        <div class="user-header">
+            <h3>管理者メニュー <span style="background:#e74c3c; color:white; padding:2px 6px; border-radius:4px; font-size:0.8em;">ADMIN</span></h3>
+            <button class="btn-logout" onclick="logout()">ログアウト</button>
+        </div>
+
+        <!-- CSV一括登録エリア -->
+        <div class="card">
+            <h3>CSVファイルで生徒を一括登録（クラウド同期）</h3>
+            <div style="text-align: center; margin-bottom: 15px;">
+                <button type="button" class="btn-secondary" onclick="downloadCSVTemplate()">📄 CSV雛形をダウンロード</button>
+            </div>
+            <div style="background:#f8f9fa; border:2px dashed #cbd5e1; padding:15px; border-radius:8px; text-align:center;">
+                <input type="file" id="csv-file-input" accept=".csv">
+                <button type="button" class="btn-purple" onclick="importCSV()">スプレッドシートへ一括登録</button>
+            </div>
+        </div>
+
+        <!-- 管理者用：全生徒アカウント・パスワード一覧確認テーブル -->
+        <div class="card">
+            <h3>👥 生徒アカウント＆パスワード一覧</h3>
+            <div id="admin-user-loading" class="loading-overlay hidden">アカウント一覧を取得中...</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ログインID</th>
+                        <th>生徒氏名</th>
+                        <th>パスワード</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-user-list"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzH1EgpTkbaNSCfLUOXILr4sYwsjB2sUYxOmxbcWA5S7hNuhqHBvwLiKssV8N8it2FO/exec";
+
+let currentUser = null;
+let currentUserName = "";
+let chartInstance = null;
+
+document.getElementById('record-date').value = new Date().toISOString().split('T')[0];
+
+// 日付文字列を YYYY/M/D 形式に整形する関数（例: 2026/9/16）
+function formatDateToYMD(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr; // 変換不能な場合はそのまま返す
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    return `${year}/${month}/${day}`;
+}
+
+// GAS通信共通関数
+async function callGAS(data) {
+    const response = await fetch(GAS_WEB_APP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify(data)
+    });
+    return await response.json();
+}
+
+// 1. ログイン処理
+document.getElementById('login-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const id = document.getElementById('student-id').value.trim();
+    const pass = document.getElementById('password').value;
+
+    document.getElementById('login-btn').disabled = true;
+    document.getElementById('login-loading').classList.remove('hidden');
+    document.getElementById('login-error').style.display = 'none';
+
+    try {
+        const res = await callGAS({ action: "login", userId: id, password: pass });
+        
+        if (res.success) {
+            currentUser = id;
+            currentUserName = res.name;
+            document.getElementById('student-id').value = '';
+            document.getElementById('password').value = '';
+
+            if (res.role === 'admin') {
+                showAdminDashboard();
+            } else {
+                showStudentDashboard();
+            }
+        } else {
+            document.getElementById('login-error').style.display = 'block';
+        }
+    } catch (err) {
+        alert("通信エラーが発生しました。GASのデプロイ設定を確認してください。");
+        console.error(err);
+    } finally {
+        document.getElementById('login-btn').disabled = false;
+        document.getElementById('login-loading').classList.add('hidden');
+    }
+});
+
+function logout() {
+    currentUser = null;
+    document.getElementById('student-dashboard').classList.add('hidden');
+    document.getElementById('admin-dashboard').classList.add('hidden');
+    document.getElementById('login-section').classList.remove('hidden');
+}
+
+// 2. 生徒用マイページ
+async function showStudentDashboard() {
+    document.getElementById('login-section').classList.add('hidden');
+    document.getElementById('student-dashboard').classList.remove('hidden');
+    document.getElementById('user-display-name').textContent = currentUserName;
+    document.getElementById('pass-status').textContent = '';
+
+    await loadStudentRecords();
+}
+
+async function loadStudentRecords() {
+    document.getElementById('graph-loading').classList.remove('hidden');
+    
+    try {
+        const res = await callGAS({ action: "getRecords", userId: currentUser });
+        if (res.success) {
+            renderStudentDashboard(res.records);
+        }
+    } catch (err) {
+        console.error("データ読み込み失敗:", err);
+    } finally {
+        document.getElementById('graph-loading').classList.add('hidden');
+    }
+}
+
+function renderStudentDashboard(records) {
+    // 日付を YYYY/M/D 形式に変換
+    const formattedRecords = records.map(r => ({
+        dateFormatted: formatDateToYMD(r.date),
+        val: r.val
+    }));
+
+    // テーブル更新
+    const tbody = document.getElementById('history-list');
+    tbody.innerHTML = '';
+    [...formattedRecords].reverse().forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.dateFormatted}</td><td>${r.val} cm</td>`;
+        tbody.appendChild(tr);
+    });
+
+    // グラフ描画（X軸のラベルに YYYY/M/D 形式を使用）
+    const labels = formattedRecords.map(r => r.dateFormatted);
+    const dataValues = formattedRecords.map(r => r.val);
+    const ctx = document.getElementById('recordChart').getContext('2d');
+
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '長座体前屈 (cm)',
+                data: dataValues,
+                borderColor: '#3498db',
+                backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.2,
+                pointRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { title: { display: true, text: '記録 (cm)' } },
+                x: { title: { display: true, text: '日付' } }
+            }
+        }
+    });
+}
+
+// 記録保存処理
+document.getElementById('record-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const date = document.getElementById('record-date').value;
+    const val = parseFloat(document.getElementById('record-val').value);
+    const statusEl = document.getElementById('save-status');
+    const saveBtn = document.getElementById('save-btn');
+
+    if (!date || isNaN(val)) return;
+
+    saveBtn.disabled = true;
+    statusEl.textContent = "スプレッドシートへ送信中...";
+    statusEl.style.color = "#f39c12";
+
+    try {
+        const res = await callGAS({
+            action: "saveRecord",
+            userId: currentUser,
+            date: date,
+            val: val
+        });
+
+        if (res.success) {
+            statusEl.textContent = "✓ スプレッドシートへ同期完了！";
+            statusEl.style.color = "#27ae60";
+            document.getElementById('record-val').value = '';
+            await loadStudentRecords();
+        }
+    } catch (err) {
+        statusEl.textContent = "※保存に失敗しました。";
+        statusEl.style.color = "#e74c3c";
+    } finally {
+        saveBtn.disabled = false;
+    }
+});
+
+// 生徒マイページ：パスワード変更フォーム処理
+document.getElementById('change-pass-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const oldPass = document.getElementById('old-pass').value;
+    const newPass = document.getElementById('new-pass').value;
+    const statusEl = document.getElementById('pass-status');
+    const btn = document.getElementById('change-pass-btn');
+
+    if (!oldPass || !newPass) return;
+
+    btn.disabled = true;
+    statusEl.textContent = "パスワード変更中...";
+    statusEl.style.color = "#f39c12";
+
+    try {
+        const res = await callGAS({
+            action: "changePassword",
+            userId: currentUser,
+            oldPassword: oldPass,
+            newPassword: newPass
+        });
+
+        if (res.success) {
+            statusEl.textContent = "✓ パスワードを変更しました！次回ログイン時から有効です。";
+            statusEl.style.color = "#27ae60";
+            document.getElementById('old-pass').value = '';
+            document.getElementById('new-pass').value = '';
+        } else {
+            statusEl.textContent = "※ " + (res.message || "変更に失敗しました");
+            statusEl.style.color = "#e74c3c";
+        }
+    } catch (err) {
+        statusEl.textContent = "※エラーが発生しました。";
+        statusEl.style.color = "#e74c3c";
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+// 3. 管理者画面 ＆ 生徒パスワード一覧表示
+async function showAdminDashboard() {
+    document.getElementById('login-section').classList.add('hidden');
+    document.getElementById('admin-dashboard').classList.remove('hidden');
+
+    await loadAdminUserList();
+}
+
+async function loadAdminUserList() {
+    document.getElementById('admin-user-loading').classList.remove('hidden');
+    const tbody = document.getElementById('admin-user-list');
+    tbody.innerHTML = '';
+
+    try {
+        const res = await callGAS({ action: "getAdminUsers" });
+        if (res.success && res.users) {
+            res.users.forEach(u => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><code>${u.id}</code></td>
+                    <td>${u.name}</td>
+                    <td><span class="pass-code">${u.pass}</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+    } catch (err) {
+        console.error("ユーザー一覧取得失敗:", err);
+    } finally {
+        document.getElementById('admin-user-loading').classList.add('hidden');
+    }
+}
+
+function downloadCSVTemplate() {
+    const csvContent = "ログインID,パスワード,生徒氏名\nstudent03,pass1234,山田 太郎\nstudent04,pass5678,佐藤 花子\n";
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = '生徒登録テンプレート.csv';
+    link.click();
+}
+
+async function importCSV() {
+    const fileInput = document.getElementById('csv-file-input');
+    const file = fileInput.files[0];
+    if (!file) { alert('CSVファイルを選択してください。'); return; }
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const lines = e.target.result.split(/\r\n|\n/);
+        let newUsers = [];
+
+        lines.forEach(line => {
+            const row = line.trim().split(',');
+            if (row.length >= 3) {
+                const id = row[0].trim();
+                const pass = row[1].trim();
+                const name = row[2].trim();
+                if (id.toLowerCase() === 'id' || id.includes('ログインID')) return;
+                if (id && pass && name) {
+                    newUsers.push({ id: id, pass: pass, name: name, role: 'student' });
+                }
+            }
+        });
+
+        if (newUsers.length > 0) {
+            alert("スプレッドシートへ登録中...");
+            const res = await callGAS({ action: "saveUsers", users: newUsers });
+            if (res.success) {
+                alert(`${newUsers.length}件のアカウントをスプレッドシートに登録・同期しました！`);
+                fileInput.value = '';
+                await loadAdminUserList();
+            }
+        }
+    };
+    reader.readAsText(file, 'UTF-8');
+}
+</script>
+</body>
+</html>
